@@ -158,7 +158,9 @@ async def guard(request: Request, call_next):
     resp = await call_next(request)
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["Referrer-Policy"] = "no-referrer"      # токен ссылки установки пароля не утечёт в Referer
+    # same-origin, не no-referrer: при no-referrer браузер шлёт форму с «Origin: null» и вход упирается в 403;
+    # на чужие сайты адрес (и токен ссылки установки пароля) по-прежнему не уходит
+    resp.headers["Referrer-Policy"] = "same-origin"
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
