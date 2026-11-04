@@ -207,7 +207,7 @@ tpl.env.filters["fmt"] = fmt
 
 # ═══════════════════════════════ вход ═══════════════════════════════
 
-@app.get("/login", response_class=HTMLResponse)
+@app.api_route("/login", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def login_page(request: Request):
     return tpl.TemplateResponse("login.html", {"request": request, "error": None, "user": None})
 
@@ -341,7 +341,7 @@ async def deliver_invites(pairs):
 
 # ═══════════════════════════════ главная ═══════════════════════════════
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 async def root(request: Request):
     u = await current_user(request)
     return RedirectResponse("/dialogs" if u else "/login", status_code=303)
