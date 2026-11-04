@@ -1,0 +1,72 @@
+{% extends "base.html" %}{% block title %}Рассылки — админка КУЗЯ{% endblock %}
+{% block body %}
+<h1>Рассылки в личку подписчикам бота</h1>
+{% if not enabled %}<div class="note warn">Боевые рассылки <b>выключены</b>. Тест себе и холостой прогон работают; красная кнопка включится по решению Вадима.</div>{% endif %}
+<form id="f" class="card" onsubmit="return false">
+  <label class="fld">Кому</label>
+  <select name="audience" id="aud">
+    <option value="all">Все подписчики — {{ n_all }}</option>
+    <option value="card2">Держатели «КУЗЯ Профи» — {{ card2_bound }} / {{ card2_total }}</option>
+  </select>
+  <p class="muted" style="margin-top:6px">«Профи»: {{ card2_bound }} привязали карту в боте из {{ card2_total }} карт в файле ВелКома — получат только привязавшие.</p>
+  <div style="height:14px"></div>
+  <label class="fld">Текст</label><textarea name="text" maxlength="4000"></textarea>
+  <div style="height:12px"></div>
+  <label class="fld">Фото (до 5, галереей) или одно видео</label>
+  <input type="file" name="files" id="files" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm">
+  <div style="height:12px"></div>
+  <div class="row">
+    <input type="text" name="btn_text" placeholder="Кнопка (необязательно), напр. «🛍 Каталог»" style="max-width:300px">
+    <input type="text" name="btn_url" placeholder="Ссылка кнопки (по умолчанию — витрина)" style="max-width:360px">
+  </div>
+  <div class="row" style="margin-top:18px">
+    <button class="btn ghost" data-step="test">1. Тест себе</button>
+    <button class="btn ghost" data-step="dry">2. Холостой прогон</button>
+    {% if is_admin %}<button class="btn red" data-step="send" id="red" disabled>3. Отправить всем</button>{% endif %}
+  </div>
+  <p class="muted" style="margin-top:8px">Любая правка текста, файлов, кнопки или сегмента сбрасывает шаги — тест и прогон нужно повторить. Пауза между сообщениями {{ delay }} с.</p>
+  <div id="note"></div>
+</form>
+<h2>История</h2>
+<div class="card" style="padding:0"><table>
+  <tr><th>#</th><th>Когда</th><th>Кто</th><th>Шаг</th><th>Кому</th><th>Текст</th><th>Итог</th></tr>
+  {% for h in hist %}<tr><td>{{ h.id }}</td><td class="muted">{{ h.created_at|fmt }}</td><td>{{ h.created_by }}</td>
+    <td>{{ {'test':'тест','dry':'прогон','send':'РАССЫЛКА'}[h.kind] }}</td><td>{{ 'Профи' if h.audience=='card2' else 'все' }}</td>
+    <td>{{ (h.text or '')[:60] }}{% if h.media %} 📎{{ h.media|length }}{% endif %}</td>
+    <td>{% if h.kind=='send' %}<span class="pill {{ 'ok' if h.status=='done' else 'queued' if h.status=='running' else 'fail' }}">{{ h.sent }}/{{ h.total }}{% if h.failed %}, сбоев {{ h.failed }}{% endif %}</span>{% elif h.kind=='dry' %}{{ h.total }} получ.{% else %}ок{% endif %}</td></tr>
+  {% else %}<tr><td colspan="7" class="muted">Пока пусто</td></tr>{% endfor %}
+</table></div>
+<script>
+const f = document.getElementById('f'), note = document.getElementById('note'), red = document.getElementById('red');
+let stage = 0, dryTotal = 0;
+function show(t, ok) { note.className = 'note ' + (ok ? 'ok' : 'err'); note.textContent = t; }
+f.addEventListener('input', () => { stage = 0; if (red) red.disabled = true; });
+const files = document.getElementById('files');
+files.onchange = () => {
+  const fs = [...files.files], v = fs.filter(x => x.type.startsWith('video/'));
+  if ((v.length && fs.length > 1) || fs.length > 5) { show('До 5 фото или одно видео', false); files.value = ''; }
+};
+f.querySelectorAll('button[data-step]').forEach(b => b.onclick = async () => {
+  const step = b.dataset.step, fd = new FormData(f);
+  if (step === 'send') {
+    const n = prompt('Рассылка уйдёт ' + dryTotal + ' подписчикам. Отменить её будет нельзя.\nДля подтверждения введите число получателей:');
+    if (n === null) return; fd.append('confirm_total', n.trim());
+  }
+  f.querySelectorAll('button').forEach(x => x.disabled = true); show('…', true);
+  let r;
+  try { r = await (await fetch('/api/broadcasts/' + step, {method:'POST', body:fd})).json(); } catch (e) { r = {ok:false, error:String(e)}; }
+  f.querySelectorAll('button[data-step]').forEach(x => x.disabled = false);
+  if (red) red.disabled = true;
+  if (!r.ok) { show(r.error, false); return; }
+  show(r.message, true);
+  if (step === 'test') stage = 1;
+  if (step === 'dry') { stage = 2; dryTotal = r.total; if (red) red.disabled = {{ 'false' if enabled else 'true' }}; }
+  if (step === 'send') poll(r.id);
+});
+async function poll(id) {
+  const r = await (await fetch('/api/broadcasts/status/' + id)).json();
+  show('Рассылка #' + id + ': отправлено ' + r.sent + ' из ' + r.total + (r.failed ? ', сбоев ' + r.failed : '') + ' — ' + r.status, true);
+  if (r.status === 'running') setTimeout(() => poll(id), 3000);
+}
+</script>
+{% endblock %}

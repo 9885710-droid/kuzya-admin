@@ -1,0 +1,65 @@
+{% extends "base.html" %}{% block title %}Посты — админка КУЗЯ{% endblock %}
+{% block body %}
+<h1>Посты в группы</h1>
+<form id="f" class="card" onsubmit="return false">
+  <label class="fld">Текст поста</label><textarea name="text" maxlength="4000"></textarea>
+  <div style="height:12px"></div>
+  <label class="fld">Фото (до 5) или одно видео</label>
+  <input type="file" name="files" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm">
+  <p class="muted" style="margin-top:6px">Под постом — кнопка «🛍 Каталог товаров» с меткой группы (g&lt;номер&gt;_&lt;ММДД&gt;): по ней аналитика видит, откуда пришли.</p>
+  <h2>Группы</h2>
+  <div class="row" style="margin-bottom:8px"><a href="#" onclick="document.querySelectorAll('.g').forEach(x=>x.checked=x.dataset.kind=='shop');return false">все магазины</a>
+    <a href="#" onclick="document.querySelectorAll('.g').forEach(x=>x.checked=false);return false">снять</a></div>
+  {% for c in chats if c.active %}
+  <label style="display:block;padding:5px 0"><input type="checkbox" class="g" name="groups" value="{{ c.chat_id }}" data-kind="{{ c.kind }}">
+    {{ c.title }} <span class="muted">· g{{ c.number }} · {{ c.participants or '?' }} уч.{{ ' · служебная' if c.kind=='service' }}</span></label>
+  {% endfor %}
+  <div class="row" style="margin-top:16px">
+    <select name="when" id="when"><option value="now">Опубликовать сейчас</option><option value="schedule">Запланировать</option></select>
+    <input type="datetime-local" name="run_at" min="{{ now }}" style="max-width:240px"> <span class="muted">время Омска</span>
+  </div>
+  <div class="row" style="margin-top:14px"><button class="btn" id="go">Опубликовать</button></div>
+  <div id="note"></div>
+</form>
+
+<h2>Список групп бота</h2>
+<div class="card">
+  <p class="muted" style="margin-bottom:10px">Max не отдаёт боту список его групп. Новые группы попадают сюда сами, когда бота добавляют в группу
+    или когда в ней пишут; остальные — вручную по id или ссылке. Бот должен состоять в группе.</p>
+  <form method="post" action="/posts/chats/add" class="row">
+    <input type="text" name="ref" placeholder="id группы или ссылка max.ru/…" style="max-width:360px" required>
+    <select name="kind"><option value="shop">магазин</option><option value="service">служебная</option></select>
+    <button class="btn sm">Добавить</button>
+  </form>
+  <table style="margin-top:12px">
+    <tr><th>Группа</th><th>Метка</th><th>Участников</th><th>Откуда</th><th></th></tr>
+    {% for c in chats %}<tr style="{{ 'opacity:.5' if not c.active }}"><td>{{ c.title or '…' }}</td><td>g{{ c.number }}</td><td>{{ c.participants or '' }}</td>
+      <td class="muted">{{ {'seed':'проверена 04.11','event':'событие бота','manual':'вручную ' ~ (c.added_by or '')}.get(c.source, c.source) }}</td>
+      <td><form method="post" action="/posts/chats/{{ c.chat_id }}/toggle"><button class="btn ghost sm">{{ 'скрыть' if c.active else 'вернуть' }}</button></form></td></tr>{% endfor %}
+  </table>
+</div>
+
+<h2>История</h2>
+<div class="card" style="padding:0"><table>
+  <tr><th>#</th><th>Когда</th><th>Кто</th><th>Текст</th><th>Групп</th><th>Итог</th></tr>
+  {% for h in hist %}{% set ok = (h.result or [])|selectattr('ok')|list|length %}
+  <tr><td>{{ h.id }}</td><td class="muted">{{ (h.published_at or h.run_at)|fmt }}</td><td>{{ h.created_by }}</td><td>{{ (h.text or '')[:60] }}{% if h.media %} 📎{{ h.media|length }}{% endif %}</td>
+    <td>{{ (h.groups or [])|length }}</td>
+    <td><span class="pill {{ 'ok' if h.status=='published' else 'queued' if h.status in ('queued','running') else 'fail' }}">{{ {'published':'ок ' ~ ok, 'queued':'ждёт', 'running':'идёт', 'failed':'сбой'}[h.status] }}</span>
+      {% for r in (h.result or []) if not r.ok %}<div class="muted">{{ r.title }}: {{ r.error }}</div>{% endfor %}</td></tr>
+  {% else %}<tr><td colspan="6" class="muted">Пока пусто</td></tr>{% endfor %}
+</table></div>
+<script>
+const f = document.getElementById('f'), note = document.getElementById('note');
+document.getElementById('go').onclick = async () => {
+  const n = f.querySelectorAll('.g:checked').length;
+  if (!n) { note.className = 'note err'; note.textContent = 'Выберите группы'; return; }
+  if (!confirm('Опубликовать в ' + n + ' групп(ы)?')) return;
+  const b = document.getElementById('go'); b.disabled = true; note.className = 'note ok'; note.textContent = 'Публикуем…';
+  let r; try { r = await (await fetch('/api/posts/publish', {method:'POST', body:new FormData(f)})).json(); } catch (e) { r = {ok:false, error:String(e)}; }
+  b.disabled = false; note.className = 'note ' + (r.ok ? 'ok' : 'err');
+  note.textContent = r.ok ? r.message : (r.error || r.message);
+  if (r.ok) setTimeout(() => location.reload(), 2500);
+};
+</script>
+{% endblock %}

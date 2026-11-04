@@ -1,0 +1,14 @@
+{% extends "base.html" %}{% block title %}Вход — админка КУЗЯ{% endblock %}
+{% block body %}
+<div class="card" style="max-width:420px;margin:60px auto">
+  <h1>Админка КУЗЯ</h1>
+  {% if error %}<div class="note err">{{ error }}</div>{% endif %}
+  <form method="post" action="/login">
+    <label class="fld">Логин</label><input type="text" name="login" autocomplete="username" required autofocus>
+    <div style="height:12px"></div>
+    <label class="fld">Пароль</label><input type="password" name="password" autocomplete="current-password" required>
+    <div style="height:16px"></div><button class="btn">Войти</button>
+  </form>
+  <p class="muted" style="margin-top:14px">Пароль задаётся по одноразовой ссылке от администратора.</p>
+</div>
+{% endblock %}

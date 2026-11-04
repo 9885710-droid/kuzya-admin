@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Админка КУЗЯ{% endblock %}</title>
+<style>
+  :root { --blue:#0B6FC9; --blue-d:#095AA6; --yellow:#FFD500; --ink:#16161A; --muted:#8A8A92;
+    --line:#E6E8EC; --bg:#F4F6F8; --card:#fff; --green:#16A34A; --red:#E1252B; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { font-family:'Segoe UI',system-ui,Arial,sans-serif; background:var(--bg); color:var(--ink); font-size:16px; }
+  a { color:var(--blue); text-decoration:none; }
+  .top { background:var(--blue); color:#fff; padding:0 20px; display:flex; align-items:center; gap:22px; height:60px; }
+  .logo { display:flex; align-items:center; gap:10px; font-weight:900; font-size:22px; letter-spacing:.5px; }
+  .logo .k { background:var(--yellow); color:var(--ink); border-radius:9px; padding:3px 10px; }
+  .nav { display:flex; gap:6px; margin-left:14px; }
+  .nav a { color:#fff; padding:9px 16px; border-radius:10px; font-weight:700; font-size:15.5px; opacity:.85; }
+  .nav a.on { background:rgba(255,255,255,.18); opacity:1; }
+  .nav a:hover { opacity:1; }
+  .top .right { margin-left:auto; display:flex; align-items:center; gap:14px; font-size:14px; }
+  .top .who { opacity:.92; } .top .who b { font-weight:700; }
+  .top .role { background:rgba(255,255,255,.16); padding:3px 9px; border-radius:8px; font-size:12.5px; }
+  .top .out { color:#fff; opacity:.85; } .top .out:hover { opacity:1; }
+  .wrap { max-width:960px; margin:26px auto; padding:0 20px; }
+  h1 { font-size:26px; margin-bottom:18px; }
+  h2 { font-size:19px; margin:22px 0 12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:22px; margin-bottom:18px; }
+  label.fld { display:block; font-weight:700; font-size:14.5px; margin-bottom:7px; }
+  textarea, input[type=text], input[type=password], input[type=datetime-local] {
+    width:100%; border:1.5px solid var(--line); border-radius:11px; padding:12px 13px; font-size:16px;
+    font-family:inherit; outline:none; background:#fff; }
+  textarea:focus, input:focus { border-color:var(--blue); }
+  textarea { min-height:120px; resize:vertical; }
+  .btn { background:var(--blue); color:#fff; border:none; border-radius:11px; padding:13px 22px; font-size:16px;
+    font-weight:800; cursor:pointer; font-family:inherit; }
+  .btn:hover { background:var(--blue-d); } .btn:active { transform:scale(.98); }
+  .btn.yellow { background:var(--yellow); color:var(--ink); } .btn.ghost { background:#fff; color:var(--blue); border:1.5px solid var(--blue); }
+  .btn.sm { padding:8px 14px; font-size:14px; }
+  .muted { color:var(--muted); font-size:13.5px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-size:12.5px; text-transform:uppercase; letter-spacing:.03em; }
+  .pill { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12.5px; font-weight:700; }
+  .pill.ok { background:#E7F6EC; color:var(--green); } .pill.fail { background:#FDECEC; color:var(--red); }
+  .pill.queued { background:#FFF6D6; color:#8a6d00; }
+  .btn.red { background:var(--red); } .btn.red:hover { background:#b81c21; } .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .note { padding:12px 14px; border-radius:11px; margin:12px 0; font-size:14.5px; } .note.ok { background:#E7F6EC; } .note.err { background:#FDECEC; }
+  .note.warn { background:#FFF6D6; }
+  select { border:1.5px solid var(--line); border-radius:11px; padding:11px; font-size:15px; background:#fff; font-family:inherit; }
+  @media (max-width:700px) { .top { flex-wrap:wrap; height:auto; padding:10px 16px; } .nav { margin-left:0; flex-wrap:wrap; } .wrap { padding:0 16px; } }
+</style>
+{% block head %}{% endblock %}
+</head>
+<body>
+{% if user %}
+<div class="top">
+  <div class="logo"><span class="k">КУЗЯ</span><span>Админка</span></div>
+  <div class="nav">
+    <a href="/dialogs" class="{{ 'on' if active=='dialogs' }}">Диалоги</a>
+    <a href="/broadcasts" class="{{ 'on' if active=='broadcasts' }}">Рассылки</a>
+    <a href="/posts" class="{{ 'on' if active=='posts' }}">Посты</a>
+    <a href="/analytics" class="{{ 'on' if active=='analytics' }}">Аналитика</a>
+    {% if is_admin %}<a href="/users" class="{{ 'on' if active=='users' }}">Пользователи</a>{% endif %}
+  </div>
+  <div class="right">
+    <span class="who"><b>{{ user.name }}</b></span>
+    <span class="role">{{ role_title }}</span>
+    <form method="post" action="/logout" style="display:inline"><button class="out" style="background:none;border:none;color:#fff;cursor:pointer;font:inherit">Выйти</button></form>
+  </div>
+</div>
+{% endif %}
+<div class="wrap">{% block body %}{% endblock %}</div>
+{% block scripts %}{% endblock %}
+</body>
+</html>

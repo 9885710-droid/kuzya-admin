@@ -1,0 +1,23 @@
+{% extends "base.html" %}{% block title %}Пользователи — админка КУЗЯ{% endblock %}
+{% block body %}
+<h1>Пользователи</h1>
+<div class="card" style="padding:0;overflow-x:auto"><table>
+  <tr><th>Логин</th><th>Роль</th><th>Пароль</th><th>Max uid (для «тест себе»)</th><th></th></tr>
+  {% for x in users %}<tr style="{{ 'opacity:.5' if not x.active }}">
+    <td><b>{{ x.login }}</b><div class="muted">{{ x.name }}</div></td><td>{{ {'admin':'администратор','marketer':'маркетолог'}[x.role] }}</td>
+    <td>{% if x.pass_hash %}задан {{ x.pass_set_at|fmt }}{% else %}<span class="muted">не задан</span>{% endif %}
+      {% if x.invite_until %}<div class="muted">ссылка до {{ x.invite_until|fmt }}</div>{% endif %}</td>
+    <td><form method="post" action="/users/{{ x.login }}/update" class="row">
+      <input type="text" name="max_uid" value="{{ x.max_uid or '' }}" style="max-width:150px">
+      <label><input type="checkbox" name="active" value="1" {{ 'checked' if x.active }}> активен</label>
+      <button class="btn ghost sm">Сохранить</button></form></td>
+    <td><form method="post" action="/users/{{ x.login }}/invite" onsubmit="return confirm('Новая ссылка для {{ x.login }} уйдёт вам в Max. Прежняя ссылка перестанет работать.')">
+      <button class="btn sm">{{ 'Сбросить пароль' if x.pass_hash else 'Ссылка' }}</button></form></td></tr>{% endfor %}
+</table></div>
+<p class="muted">Ссылка установки пароля одноразовая, живёт 24 ч и приходит администратору в личку Max — сюда она не выводится.
+  Новый пароль сразу завершает старые сессии этого человека.</p>
+<h2>Журнал действий</h2>
+<div class="card" style="padding:0;overflow-x:auto"><table><tr><th>Когда</th><th>Кто</th><th>Действие</th><th>Подробности</th><th>IP</th></tr>
+  {% for l in logs %}<tr><td class="muted">{{ l.ts|fmt }}</td><td>{{ l.who }}</td><td>{{ l.action }}</td><td>{{ l.details }}</td><td class="muted">{{ l.ip or '' }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

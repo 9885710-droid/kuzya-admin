@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}Диалоги — админка КУЗЯ{% endblock %}
+{% block body %}
+<h1>Диалоги</h1>
+<form class="row" method="get" action="/dialogs" style="margin-bottom:16px">
+  <input type="text" name="q" value="{{ q }}" placeholder="Телефон, имя или uid" style="max-width:360px">
+  <select name="only"><option value="">Все</option><option value="open" {{ 'selected' if only=='open' }}>Ждут ответа</option></select>
+  <button class="btn sm">Найти</button>
+  {% if q or only %}<a href="/dialogs" class="muted">сбросить</a>{% endif %}
+</form>
+<div class="card" style="padding:0">
+<table>
+  <tr><th>Кто</th><th>Последнее</th><th>Когда</th><th></th></tr>
+  {% for r in rows %}
+  <tr style="cursor:pointer" onclick="location='/dialogs/{{ r.user_id }}'">
+    <td><b>{{ r.uname or ('id ' ~ r.user_id) }}</b>{% if r.phone %}<div class="muted">{{ r.phone }}</div>{% endif %}</td>
+    <td>{{ (r.last_text or '—')[:90] }}</td>
+    <td class="muted">{{ r.last_at|fmt }}</td>
+    <td>{% if r.unanswered %}<span class="pill fail">ждёт · {{ r.unanswered }}</span>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="4" class="muted">Ничего не найдено{% if q|length >= 6 %} — по телефону ищем в контактах заказов и привязках карт{% endif %}</td></tr>{% endfor %}
+</table>
+</div>
+<script>setTimeout(()=>location.reload(), 30000)</script>
+{% endblock %}

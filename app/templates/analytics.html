@@ -1,0 +1,23 @@
+{% extends "base.html" %}{% block title %}Аналитика — админка КУЗЯ{% endblock %}
+{% block body %}
+<h1>Аналитика</h1>
+<div class="row" style="gap:14px;margin-bottom:6px">
+  <div class="card" style="flex:1;min-width:180px"><div class="muted">Подписчиков в базе</div><div style="font-size:28px;font-weight:800">{{ base.total }}</div>
+    <div class="muted">из них восстановлено из «Мониторинга»: {{ base.recovered }}</div></div>
+  <div class="card" style="flex:1;min-width:180px"><div class="muted">Новых с {{ since.strftime('%d.%m') }}</div><div style="font-size:28px;font-weight:800">{{ base.new_since }}</div></div>
+</div>
+<div class="card" style="padding:0;overflow-x:auto"><table>
+  <tr><th>День (Омск)</th><th>Новые</th><th>Старты</th><th>Вопросы</th><th>Витрина</th><th>Заказы</th><th>Сумма</th><th>Оплачено</th><th>Сумма</th></tr>
+  {% for d in days %}<tr><td>{{ d.d.strftime('%d.%m') }}</td><td>{{ d.subs }}</td><td>{{ d.starts }}</td><td>{{ d.questions }}</td><td>{{ d.vitrina }}</td>
+    <td>{{ d.orders }}</td><td>{{ '{:,}'.format(d.orders_sum|int).replace(',', ' ') }} ₽</td><td>{{ d.paid }}</td><td>{{ '{:,}'.format(d.paid_sum|int).replace(',', ' ') }} ₽</td></tr>{% endfor %}
+</table></div>
+<p class="muted">«Новые» — первые появления в боте, без восстановленных. «Витрина» — уникальные входы. Заказы — без тестовых ({{ tests }} тестовых скрыто).
+  «Оплачено» — онлайн-оплата подтверждена Paygine; оплата при получении здесь не видна.</p>
+<h2>Заказы по магазинам</h2>
+<div class="card" style="padding:0"><table><tr><th>Магазин</th><th>Заказов</th><th>Сумма</th><th>Оплачено онлайн</th></tr>
+  {% for s in shops %}<tr><td>{{ s.shop }}</td><td>{{ s.n }}</td><td>{{ '{:,}'.format(s.s|int).replace(',', ' ') }} ₽</td><td>{{ s.paid }}</td></tr>
+  {% else %}<tr><td colspan="4" class="muted">Заказов пока нет</td></tr>{% endfor %}</table></div>
+<h2>Откуда пришли новые</h2>
+<div class="card" style="padding:0"><table><tr><th>Метка</th><th>Человек</th></tr>
+  {% for s in sources %}<tr><td>{{ s.src }}</td><td>{{ s.n }}</td></tr>{% else %}<tr><td colspan="2" class="muted">—</td></tr>{% endfor %}</table></div>
+{% endblock %}

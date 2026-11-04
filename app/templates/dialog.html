@@ -1,0 +1,81 @@
+{% extends "base.html" %}{% block title %}Диалог — админка КУЗЯ{% endblock %}
+{% block head %}<style>
+  .msgs { display:flex; flex-direction:column; gap:8px; max-height:60vh; overflow-y:auto; padding:4px; }
+  .m { max-width:78%; padding:10px 13px; border-radius:13px; white-space:pre-wrap; word-wrap:break-word; font-size:15px; }
+  .m.in { background:#fff; border:1px solid var(--line); align-self:flex-start; }
+  .m.out { background:#E3F0FC; align-self:flex-end; }
+  .m.sys { background:none; color:var(--muted); align-self:center; font-size:13px; }
+  .m .meta { font-size:12px; color:var(--muted); margin-top:4px; }
+  .m.failed { background:#FDECEC; }
+  .prod { padding:7px 10px; cursor:pointer; border-bottom:1px solid var(--line); font-size:14px; } .prod:hover { background:var(--bg); }
+</style>{% endblock %}
+{% block body %}
+<p><a href="/dialogs">← все диалоги</a></p>
+<h1 style="margin-top:8px">{{ card.uname or ('id ' ~ card.user_id) }}</h1>
+<p class="muted">uid {{ card.user_id }}{% if card.phone %} · {{ card.phone }}{% endif %}{% if card.source %} · пришёл: {{ card.source }}{% endif %}
+  · в базе с {{ card.created_at|fmt }}</p>
+{% if orders %}<p class="muted">Заказы: {% for o in orders %}№{{ o.site_order_id or o.id }} {{ o.total|int }} ₽ ({{ o.pay_status or o.status }}{{ ', ТЕСТ' if o.is_test }}){{ '; ' if not loop.last }}{% endfor %}</p>{% endif %}
+<div class="card" style="margin-top:14px"><div class="msgs" id="msgs"></div></div>
+<div class="card">
+  <textarea id="reply" placeholder="Ответ покупателю — уйдёт от имени бота КУЗЯ"></textarea>
+  <div class="row" style="margin-top:10px">
+    <button class="btn" id="send">Отправить</button>
+    <button class="btn ghost sm" id="done" title="Вопрос закрыт без ответа (например, ответили по телефону)">Ответ не нужен</button>
+    <input type="text" id="ps" placeholder="Товар для ссылки /p/…" style="max-width:280px">
+  </div>
+  <div id="plist" style="margin-top:8px"></div>
+  <div id="note"></div>
+</div>
+<script>
+const UID = {{ card.user_id }};
+let last = 0;
+const box = document.getElementById('msgs'), note = document.getElementById('note');
+function show(t, ok) { note.className = 'note ' + (ok ? 'ok' : 'err'); note.textContent = t; }
+function bubble(m) {
+  const d = document.createElement('div');
+  const sys = m.kind === 'start';
+  d.className = 'm ' + (sys ? 'sys' : m.dir) + (m.delivery ? ' failed' : '');
+  d.textContent = sys ? ('▶️ запустил бота' + (m.payload ? ' · ' + m.payload : '')) : (m.text || (m.payload ? '[' + m.payload + ']' : '[пусто]'));
+  const meta = document.createElement('div'); meta.className = 'meta';
+  const who = m.kind === 'operator' ? ('оператор ' + m.operator) : m.kind === 'stub' ? 'бот (заглушка)' : m.kind === 'broadcast' ? 'рассылка' : '';
+  meta.textContent = [m.at, who, m.edited ? 'изменено' : '', m.delivery ? 'НЕ ДОСТАВЛЕНО' : ''].filter(Boolean).join(' · ');
+  if (m.editable) {
+    const a = document.createElement('a'); a.href = '#'; a.textContent = ' · править';
+    a.onclick = async (e) => { e.preventDefault();
+      const t = prompt('Новый текст ответа', m.text); if (t === null) return;
+      const r = await (await fetch('/api/messages/' + m.id + '/edit', {method:'POST', body:new URLSearchParams({text:t})})).json();
+      if (r.ok) { d.firstChild.textContent = t; m.text = t; } else show(r.error, false); };
+    meta.appendChild(a);
+  }
+  d.appendChild(meta); return d;
+}
+async function load() {
+  const r = await (await fetch('/api/dialogs/' + UID + '/messages?after=' + last)).json();
+  if (!r.ok) return;
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  for (const m of r.messages) { box.appendChild(bubble(m)); last = m.id; }
+  if (r.messages.length && (atBottom || last === r.messages[r.messages.length-1].id)) box.scrollTop = box.scrollHeight;
+}
+document.getElementById('send').onclick = async () => {
+  const t = document.getElementById('reply').value.trim(); if (!t) return;
+  const b = document.getElementById('send'); b.disabled = true;
+  const r = await (await fetch('/api/dialogs/' + UID + '/reply', {method:'POST', body:new URLSearchParams({text:t})})).json();
+  b.disabled = false;
+  if (r.ok) { document.getElementById('reply').value = ''; show('Отправлено', true); } else show(r.error, false);
+  load();
+};
+document.getElementById('done').onclick = async () => {
+  await fetch('/api/dialogs/' + UID + '/done', {method:'POST'}); show('Отмечено: ответ не нужен', true);
+};
+let pt;
+document.getElementById('ps').oninput = (e) => { clearTimeout(pt); pt = setTimeout(async () => {
+  const r = await (await fetch('/api/products?q=' + encodeURIComponent(e.target.value))).json();
+  const pl = document.getElementById('plist'); pl.innerHTML = '';
+  for (const it of (r.items || [])) {
+    const d = document.createElement('div'); d.className = 'prod'; d.textContent = it.title;
+    d.onclick = () => { const ta = document.getElementById('reply'); ta.value = (ta.value ? ta.value.trimEnd() + '\n' : '') + it.title + ': ' + it.url; pl.innerHTML = ''; };
+    pl.appendChild(d);
+  } }, 300); };
+load(); setInterval(load, 8000);
+</script>
+{% endblock %}

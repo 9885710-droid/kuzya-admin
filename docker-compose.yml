@@ -1,0 +1,32 @@
+# Админка КУЗЯ: moscow, /opt/kuzya-admin (04.11.2026). Маршрут adminkuzya.velcom-holding.ru — TRAEFIK_ENABLE=true в .env
+# после ока общего агента; до того — только 127.0.0.1:8083 через ssh-туннель.
+name: kuzya-admin
+services:
+  admin:
+    build: .
+    image: kuzya-admin:latest
+    container_name: kuzya-admin
+    restart: unless-stopped
+    env_file: [.env, /root/pg-secrets/kuzya.env]
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    ports: ["127.0.0.1:8083:8000"]
+    volumes:
+      - ./uploads:/app/uploads        # фото и видео рассылок и постов (владелец uid 10001)
+    networks: [default]
+    labels:
+      traefik.enable: "${TRAEFIK_ENABLE:-false}"
+      traefik.docker.network: kuzya-admin
+      traefik.http.routers.kuzya-admin.entrypoints: websecure
+      traefik.http.routers.kuzya-admin.rule: Host(`adminkuzya.velcom-holding.ru`)
+      traefik.http.routers.kuzya-admin.tls.certresolver: le
+      traefik.http.services.kuzya-admin.loadbalancer.server.port: "8000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz',timeout=5)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+      start_interval: 2s     # Traefik публикует только после первого healthy
+networks:
+  default:
+    name: kuzya-admin

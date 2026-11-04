@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}Пароль — админка КУЗЯ{% endblock %}
+{% block body %}
+<div class="card" style="max-width:440px;margin:60px auto">
+  <h1>Установка пароля</h1>
+  {% if error %}<div class="note err">{{ error }}</div>{% endif %}
+  {% if inv %}
+  <p style="margin-bottom:14px">Логин: <b>{{ inv.login }}</b> ({{ inv.name }})</p>
+  <form method="post" action="/setpass">
+    <input type="hidden" name="t" value="{{ t }}">
+    <label class="fld">Новый пароль (не короче 10 символов)</label><input type="password" name="p1" autocomplete="new-password" required minlength="10">
+    <div style="height:12px"></div>
+    <label class="fld">Ещё раз</label><input type="password" name="p2" autocomplete="new-password" required minlength="10">
+    <div style="height:16px"></div><button class="btn">Сохранить и войти</button>
+  </form>
+  <p class="muted" style="margin-top:14px">Ссылка одноразовая: после сохранения она перестанет работать.</p>
+  {% endif %}
+</div>
+{% endblock %}
