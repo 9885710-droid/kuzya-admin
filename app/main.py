@@ -31,6 +31,8 @@ from . import maxbot
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("kuzya-admin")
+for _n in ("httpx", "httpcore"):          # адреса запросов (id чатов, ссылки загрузки) в журнал не пишем
+    logging.getLogger(_n).setLevel(logging.WARNING)
 
 BASE = Path(__file__).resolve().parent
 UPLOADS = Path(os.environ.get("UPLOADS_DIR", "/app/uploads"))
