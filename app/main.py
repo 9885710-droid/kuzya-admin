@@ -161,7 +161,7 @@ async def guard(request: Request, call_next):
     # same-origin, не no-referrer: при no-referrer браузер шлёт форму с «Origin: null» и вход упирается в 403;
     # на чужие сайты адрес (и токен ссылки установки пароля) по-прежнему не уходит
     resp.headers["Referrer-Policy"] = "same-origin"
-    resp.headers["Cache-Control"] = "no-store"
+    resp.headers.setdefault("Cache-Control", "no-store")
     return resp
 
 
@@ -347,6 +347,25 @@ async def deliver_invites(pairs):
 async def root(request: Request):
     u = await current_user(request)
     return RedirectResponse("/dialogs" if u else "/login", status_code=303)
+
+
+STATIC_ICONS = {"favicon.ico": "image/x-icon", "apple-touch-icon.png": "image/png", "icon-192.png": "image/png"}
+
+
+def _icon(name):
+    """Иконки — те же, что у витрины КУЗЯ (копия в app/static); без входа, кэш на сутки."""
+    return Response((BASE / "static" / name).read_bytes(), media_type=STATIC_ICONS[name],
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+def _icon_route(name):
+    async def route():                # без параметров: имя файла не приходит из запроса
+        return _icon(name)
+    return route
+
+
+for _name in STATIC_ICONS:
+    app.add_api_route("/" + _name, _icon_route(_name), methods=["GET"], include_in_schema=False)
 
 
 @app.get("/healthz")
