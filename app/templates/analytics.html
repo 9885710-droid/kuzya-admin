@@ -18,6 +18,15 @@
   {% for s in shops %}<tr><td>{{ s.shop }}</td><td>{{ s.n }}</td><td>{{ '{:,}'.format(s.s|int).replace(',', ' ') }} ₽</td><td>{{ s.paid }}</td></tr>
   {% else %}<tr><td colspan="4" class="muted">Заказов пока нет</td></tr>{% endfor %}</table></div>
 <h2>Откуда пришли новые</h2>
-<div class="card" style="padding:0"><table><tr><th>Метка</th><th>Человек</th></tr>
-  {% for s in sources %}<tr><td>{{ s.src }}</td><td>{{ s.n }}</td></tr>{% else %}<tr><td colspan="2" class="muted">—</td></tr>{% endfor %}</table></div>
+<div class="card" style="padding:0"><table><tr><th>Источник</th><th>Человек</th></tr>
+  {% for g in sources %}
+  <tr><td colspan="2" style="padding:0">
+    <details {{ 'open' if g.rows|length <= 3 }}><summary style="cursor:pointer;padding:10px 12px;display:flex;justify-content:space-between">
+      <b>{{ g.title }}</b><b>{{ g.n }}</b></summary>
+      <table>{% for r in g.rows %}<tr><td style="padding-left:28px">{{ r.label }} <span class="muted" style="font-size:12px">· {{ r.src }}</span></td>
+        <td style="width:90px">{{ r.n }}</td></tr>{% endfor %}</table>
+    </details></td></tr>
+  {% else %}<tr><td colspan="2" class="muted">—</td></tr>{% endfor %}</table></div>
+<p class="muted">Посты прежней админки (метки g1–g25) — по номеру: список групп Питера, к которому они относились, утерян.
+  Новые посты (g101 и дальше) — с названием группы.</p>
 {% endblock %}

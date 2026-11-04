@@ -779,6 +779,39 @@ async def scheduler_loop():
 
 # ═══════════════════════════════ аналитика ═══════════════════════════════
 
+SRC_GROUP_RE = re.compile(r"^g(\d+)_(\d{2})(\d{2})$")
+SRC_SHARE_RE = re.compile(r"^share_(\d+)(?:_|$)")
+
+
+async def label_sources(raw):
+    """Метки ?start= → по-человечески, тремя группами. g<N>: N от 101 — номер из kuzya_bot_chats; старые g1–g25 —
+    нумерация списка групп Питера (утерян), их показываем номером. share_<id>: id = kuzya_products.id, хвост q_… —
+    поисковый запрос, не показываем."""
+    chats = {r["number"]: r["title"] for r in await q("SELECT number, title FROM kuzya_bot_chats")}
+    ids = [int(m.group(1)) for r in raw if r["src"] and (m := SRC_SHARE_RE.match(r["src"]))]
+    prods = {r["id"]: r["title"] for r in await q("SELECT id, title FROM kuzya_products WHERE id = ANY($1)", ids)} if ids else {}
+    out = {"posts": {"title": "Посты в группах", "n": 0, "rows": []},
+           "share": {"title": "Поделились товаром", "n": 0, "rows": []},
+           "self": {"title": "Пришли сами (поиск в Max, прямая ссылка)", "n": 0, "rows": []},
+           "other": {"title": "Другие метки", "n": 0, "rows": []}}
+    for r in raw:
+        src, n = r["src"], r["n"]
+        if not src:
+            key, label = "self", "Пришли сами (поиск в Max, прямая ссылка)"
+        elif m := SRC_GROUP_RE.match(src):
+            num, dd = int(m.group(1)), f"{m.group(3)}.{m.group(2)}"
+            title = chats.get(num)
+            key, label = "posts", (f"Пост в группе «{title}» от {dd}" if title else f"Пост в группе №{num} от {dd}")
+        elif m := SRC_SHARE_RE.match(src):
+            pid = int(m.group(1))
+            key, label = "share", f"Поделились товаром: {prods.get(pid) or f'товар №{pid} (нет в каталоге)'}"
+        else:
+            key, label = "other", src
+        out[key]["n"] += n
+        out[key]["rows"].append({"label": label, "src": src or "без метки", "n": n})
+    return [g for g in out.values() if g["n"]]
+
+
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics(request: Request):
     u = await current_user(request)
@@ -804,8 +837,9 @@ async def analytics(request: Request):
     shops = await q("""SELECT COALESCE(s.city || ', ' || s.address, o.shop_id::text) shop, COUNT(*) n, SUM(o.total) s,
                               COUNT(*) FILTER (WHERE o.pay_status='paid') paid
                        FROM kuzya_orders_log o LEFT JOIN kuzya_shops s ON s.id=o.shop_id WHERE NOT o.is_test GROUP BY 1 ORDER BY 2 DESC""")
-    sources = await q("""SELECT COALESCE(source,'(без метки)') src, COUNT(*) n FROM kuzya_bot_users
-                         WHERE COALESCE(source,'') <> 'recovered' AND created_at >= $1 GROUP BY 1 ORDER BY 2 DESC LIMIT 30""", t0)
+    raw = await q("""SELECT source src, COUNT(*) n FROM kuzya_bot_users
+                     WHERE COALESCE(source,'') <> 'recovered' AND created_at >= $1 GROUP BY 1 ORDER BY 2 DESC""", t0)
+    sources = await label_sources(raw)
     tests = await qv("SELECT COUNT(*) FROM kuzya_orders_log WHERE is_test")
     return tpl.TemplateResponse("analytics.html", ctx(request, u, "analytics", days=days, base=base, shops=shops,
                                                       sources=sources, tests=tests, since=SINCE))
