@@ -1,0 +1,7 @@
+# Общий middleware заголовков (HSTS и др.) общего агента: /opt/traefik/dynamic, имя secure-headers@file.
+# Подключается строкой COMPOSE_FILE=docker-compose.yml:docker-compose.headers.yml в .env — только когда файл
+# middleware уже лежит у Traefik: ссылка на несуществующий middleware роняет роутер.
+services:
+  admin:
+    labels:
+      traefik.http.routers.kuzya-admin.middlewares: secure-headers@file
