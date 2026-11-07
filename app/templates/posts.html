@@ -5,20 +5,33 @@
   <label class="fld">Текст поста</label><textarea name="text" maxlength="4000"></textarea>
   <div style="height:12px"></div>
   <label class="fld">Фото (до 5) или одно видео</label>
-  <input type="file" name="files" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm">
-  <p class="muted" style="margin-top:6px">Под постом — кнопка «🛍 Каталог товаров» с меткой группы (g&lt;номер&gt;_&lt;ММДД&gt;): по ней аналитика видит, откуда пришли.</p>
+  <input type="file" name="files" id="files" multiple accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/quicktime,video/webm">
+  <div style="height:12px"></div>
+  <label class="fld">Кнопки под постом</label>
+  <div class="row"><span class="muted">🛍 Каталог товаров +</span>
+    <select name="btn2" id="btn2"><option value="assistant">🤖 Личный помощник КУЗЯ</option><option value="card">💳 Привязать карту</option></select></div>
+  <p class="muted" style="margin-top:6px">Переходы по кнопкам видны в Аналитике.</p>
+  <h2>Предпросмотр</h2>
+  <div style="background:#e9eef3;border-radius:14px;padding:14px;max-width:420px">
+    <div style="background:#fff;border-radius:12px;overflow:hidden">
+      <div id="pv-media"></div>
+      <div id="pv-text" style="padding:10px 12px;white-space:pre-wrap;word-wrap:break-word;font-size:15px"></div>
+    </div>
+    <div id="pv-btns" style="margin-top:6px;display:grid;gap:6px"></div>
+  </div>
   <h2>Группы</h2>
   <div class="row" style="margin-bottom:8px"><a href="#" onclick="document.querySelectorAll('.g').forEach(x=>x.checked=x.dataset.kind=='shop');return false">все магазины</a>
     <a href="#" onclick="document.querySelectorAll('.g').forEach(x=>x.checked=false);return false">снять</a></div>
   {% for c in chats if c.active %}
   <label style="display:block;padding:5px 0"><input type="checkbox" class="g" name="groups" value="{{ c.chat_id }}" data-kind="{{ c.kind }}">
-    {{ c.title }} <span class="muted">· g{{ c.number }} · {{ c.participants or '?' }} уч.{{ ' · служебная' if c.kind=='service' }}</span></label>
+    {{ c.title }} <span class="muted">· {{ c.participants or '?' }} уч.{{ ' · служебная' if c.kind=='service' }}</span></label>
   {% endfor %}
   <div class="row" style="margin-top:16px">
     <select name="when" id="when"><option value="now">Опубликовать сейчас</option><option value="schedule">Запланировать</option></select>
     <input type="datetime-local" name="run_at" min="{{ now }}" style="max-width:240px"> <span class="muted">время Омска</span>
   </div>
-  <div class="row" style="margin-top:14px"><button class="btn" id="go">Опубликовать</button></div>
+  <div class="row" style="margin-top:14px"><button class="btn ghost" id="test">Отправить пробный пост себе</button>
+    <button class="btn" id="go">Опубликовать</button></div>
   <div id="note"></div>
 </form>
 
@@ -51,6 +64,35 @@
 </table></div>
 <script>
 const f = document.getElementById('f'), note = document.getElementById('note');
+// предпросмотр: как пост выглядит в Max — фото/галерея или видео, текст, кнопки (тексты — через textContent)
+function preview() {
+  document.getElementById('pv-text').textContent = f.text.value || '(текст поста)';
+  const m = document.getElementById('pv-media'); m.innerHTML = '';
+  const fs = [...document.getElementById('files').files];
+  if (fs.length) {
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:grid;gap:2px;grid-template-columns:' + (fs.length > 1 ? '1fr 1fr' : '1fr');
+    for (const x of fs) {
+      const el = document.createElement(x.type.startsWith('video/') ? 'video' : 'img');
+      el.src = URL.createObjectURL(x); el.style.cssText = 'width:100%;display:block;max-height:260px;object-fit:cover';
+      if (el.tagName === 'VIDEO') el.controls = true;
+      grid.appendChild(el);
+    }
+    m.appendChild(grid);
+  }
+  const b = document.getElementById('pv-btns'); b.innerHTML = '';
+  for (const t of ['🛍 Каталог товаров', document.getElementById('btn2').selectedOptions[0].textContent]) {
+    const d = document.createElement('div'); d.textContent = t;
+    d.style.cssText = 'background:#fff;border-radius:10px;padding:9px;text-align:center;color:var(--blue);font-weight:700;font-size:14px';
+    b.appendChild(d);
+  }
+}
+f.addEventListener('input', preview); f.addEventListener('change', preview); preview();
+document.getElementById('test').onclick = async () => {
+  const b = document.getElementById('test'); b.disabled = true; note.className = 'note ok'; note.textContent = 'Отправляем пробный пост…';
+  let r; try { r = await (await fetch('/api/posts/test', {method:'POST', body:new FormData(f)})).json(); } catch (e) { r = {ok:false, error:String(e)}; }
+  b.disabled = false; note.className = 'note ' + (r.ok ? 'ok' : 'err'); note.textContent = r.ok ? r.message : r.error;
+};
 document.getElementById('go').onclick = async () => {
   const n = f.querySelectorAll('.g:checked').length;
   if (!n) { note.className = 'note err'; note.textContent = 'Выберите группы'; return; }

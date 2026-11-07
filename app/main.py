@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS kuzya_bot_chats (
 CREATE TABLE IF NOT EXISTS kuzya_scheduled_posts (
   id BIGSERIAL PRIMARY KEY, text TEXT, media JSONB, groups JSONB, run_at TIMESTAMPTZ, status TEXT NOT NULL,
   created_by TEXT, published_at TIMESTAMPTZ, result JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
+ALTER TABLE IF EXISTS kuzya_scheduled_posts ADD COLUMN IF NOT EXISTS btn2 TEXT;
 CREATE TABLE IF NOT EXISTS kuzya_post_tags (
   tag TEXT PRIMARY KEY, chat_id BIGINT, title TEXT, post_id BIGINT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS kuzya_loyalty_bindings (
@@ -680,8 +681,15 @@ def post_tag(number):
     return f"g{number}_{datetime.now(timezone(timedelta(hours=3))):%m%d}"     # метка по МСК, как у прежнего бота
 
 
-def post_keyboard(tag):
-    return maxbot.link_keyboard([[("🛍 Каталог товаров", f"https://max.ru/{BOT_USERNAME}?startapp={tag}")]])
+# вторая кнопка под постом (запрос Николая 07.11, как до аварии): чат с помощником или сразу привязка карты;
+# обе стартуют бота с меткой группы — аналитика видит источник (card_<метка> бот ведёт в карточный сценарий)
+POST_BTN2 = {"assistant": ("🤖 Личный помощник КУЗЯ", "{tag}"), "card": ("💳 Привязать карту", "card_{tag}")}
+
+
+def post_keyboard(tag, btn2="assistant"):
+    title, start = POST_BTN2.get(btn2, POST_BTN2["assistant"])
+    return maxbot.link_keyboard([[("🛍 Каталог товаров", f"https://max.ru/{BOT_USERNAME}?startapp={tag}")],
+                                 [(title, f"https://max.ru/{BOT_USERNAME}?start={start.format(tag=tag)}")]])
 
 
 async def add_chat(ref, by, source="manual", kind="shop"):
@@ -738,13 +746,13 @@ async def posts_chat_toggle(request: Request, chat_id: int):
     return RedirectResponse("/posts", status_code=303)
 
 
-async def publish(post_id, text, media, groups):
+async def publish(post_id, text, media, groups, btn2="assistant"):
     atts = await upload_all(media)
     results = []
     for g in groups:
         tag = post_tag(g["number"])
         try:
-            await maxbot.send(chat_id=g["chat_id"], text=text, attachments=atts + [post_keyboard(tag)])
+            await maxbot.send(chat_id=g["chat_id"], text=text, attachments=atts + [post_keyboard(tag, btn2)])
             await qx("INSERT INTO kuzya_post_tags(tag, chat_id, title, post_id) VALUES ($1,$2,$3,$4) ON CONFLICT (tag) DO UPDATE "
                      "SET post_id=EXCLUDED.post_id", tag, g["chat_id"], g["title"], post_id)
             results.append({"title": g["title"], "ok": True})
@@ -759,7 +767,7 @@ async def publish(post_id, text, media, groups):
 
 @app.post("/api/posts/publish")
 async def posts_publish(request: Request, text: str = Form(""), groups: list[str] = Form([]), when: str = Form("now"),
-                        run_at: str = Form(""), files: list[UploadFile] = File([])):
+                        run_at: str = Form(""), btn2: str = Form("assistant"), files: list[UploadFile] = File([])):
     u = await current_user(request)
     if not u: return JSONResponse({"ok": False}, status_code=401)
     media, err = await save_media(files)
@@ -774,14 +782,38 @@ async def posts_publish(request: Request, text: str = Form(""), groups: list[str
         try: run_utc = datetime.strptime(run_at, "%Y-%m-%dT%H:%M").replace(tzinfo=OMSK).astimezone(timezone.utc)
         except ValueError: return {"ok": False, "error": "Неверные дата и время"}
         if run_utc < datetime.now(timezone.utc): return {"ok": False, "error": "Время уже прошло"}
-    pid = await qv("INSERT INTO kuzya_scheduled_posts(text, media, groups, run_at, status, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
-                   text, media, targets, run_utc or datetime.now(timezone.utc), "queued" if run_utc else "running", u["login"])
+    btn2 = btn2 if btn2 in POST_BTN2 else "assistant"
+    pid = await qv("INSERT INTO kuzya_scheduled_posts(text, media, groups, run_at, status, created_by, btn2) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+                   text, media, targets, run_utc or datetime.now(timezone.utc), "queued" if run_utc else "running", u["login"], btn2)
     await log_action(u["login"], "post_" + ("schedule" if run_utc else "publish"), f"#{pid}: {len(targets)} групп", client_ip(request))
     if run_utc:
         return {"ok": True, "message": f"Пост #{pid} запланирован на {fmt(run_utc)} (Омск), групп: {len(targets)}"}
-    res = await publish(pid, text, media, targets)
+    res = await publish(pid, text, media, targets, btn2)
     ok = sum(r["ok"] for r in res)
     return {"ok": ok > 0, "message": f"Опубликовано: {ok} из {len(res)}", "results": res}
+
+
+@app.post("/api/posts/test")
+async def posts_test(request: Request, text: str = Form(""), groups: list[str] = Form([]), btn2: str = Form("assistant"),
+                     files: list[UploadFile] = File([])):
+    """Пробный пост себе в личку — тот же текст, медиа и кнопки (метка первой выбранной группы), в группы не уходит."""
+    u = await current_user(request)
+    if not u: return JSONResponse({"ok": False}, status_code=401)
+    if not u["max_uid"]:
+        return {"ok": False, "error": "Не задан ваш Max uid — администратор заполняет его в «Пользователях»"}
+    media, err = await save_media(files)
+    if err: return {"ok": False, "error": err}
+    if not text.strip() and not media: return {"ok": False, "error": "Пустой пост"}
+    ids = [int(g) for g in groups if re.fullmatch(r"-?\d+", g)]
+    first = await q1("SELECT number FROM kuzya_bot_chats WHERE chat_id = ANY($1) ORDER BY number LIMIT 1", ids) if ids else None
+    try:
+        atts = await upload_all(media)
+        await maxbot.send(user_id=u["max_uid"], text=text.strip(),
+                          attachments=atts + [post_keyboard(post_tag(first["number"] if first else 0), btn2)])
+    except Exception as e:
+        return {"ok": False, "error": f"Не ушло: {str(e)[:150]}"}
+    await log_action(u["login"], "post_test", f"btn2={btn2}", client_ip(request))
+    return {"ok": True, "message": "Пробный пост отправлен вам в Max — так он будет выглядеть в группе."}
 
 
 async def scheduler_loop():
@@ -790,7 +822,7 @@ async def scheduler_loop():
         try:
             for r in await q("""UPDATE kuzya_scheduled_posts SET status='running' WHERE id IN (SELECT id FROM kuzya_scheduled_posts
                                 WHERE status='queued' AND run_at <= NOW() ORDER BY run_at LIMIT 3) RETURNING *"""):
-                await publish(r["id"], r["text"] or "", r["media"] or [], r["groups"] or [])
+                await publish(r["id"], r["text"] or "", r["media"] or [], r["groups"] or [], r["btn2"] or "assistant")
         except Exception as e:
             log.warning("scheduler: %s", e)
         await asyncio.sleep(30)
@@ -798,7 +830,7 @@ async def scheduler_loop():
 
 # ═══════════════════════════════ аналитика ═══════════════════════════════
 
-SRC_GROUP_RE = re.compile(r"^g(\d+)_(\d{2})(\d{2})$")
+SRC_GROUP_RE = re.compile(r"^(card_)?g(\d+)_(\d{2})(\d{2})$")
 SRC_SHARE_RE = re.compile(r"^share_(\d+)(?:_|$)")
 
 
@@ -818,9 +850,11 @@ async def label_sources(raw):
         if not src:
             key, label = "self", "Пришли сами (поиск в Max, прямая ссылка)"
         elif m := SRC_GROUP_RE.match(src):
-            num, dd = int(m.group(1)), f"{m.group(3)}.{m.group(2)}"
+            num, dd = int(m.group(2)), f"{m.group(4)}.{m.group(3)}"
             title = chats.get(num)
             key, label = "posts", (f"Пост в группе «{title}» от {dd}" if title else f"Пост в группе №{num} от {dd}")
+            if m.group(1):
+                label += " — кнопка «Привязать карту»"
         elif m := SRC_SHARE_RE.match(src):
             pid = int(m.group(1))
             key, label = "share", f"Поделились товаром: {prods.get(pid) or f'товар №{pid} (нет в каталоге)'}"
