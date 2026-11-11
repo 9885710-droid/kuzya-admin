@@ -127,6 +127,8 @@ CREATE TABLE IF NOT EXISTS kuzya_post_tags (
 CREATE TABLE IF NOT EXISTS kuzya_loyalty_bindings (
   user_id BIGINT NOT NULL, phone TEXT NOT NULL, bound_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), PRIMARY KEY (user_id, phone));
 ALTER TABLE kuzya_messages ADD COLUMN IF NOT EXISTS delivery TEXT;
+ALTER TABLE kuzya_bot_users ADD COLUMN IF NOT EXISTS unsubscribed_at TIMESTAMPTZ;
+ALTER TABLE kuzya_bot_users ADD COLUMN IF NOT EXISTS origin TEXT;   -- piter_backup / recovered / пусто для живых
 ALTER TABLE kuzya_messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 """
 
@@ -546,9 +548,9 @@ async def segment_uids(audience):
     if audience == "card2":
         rows = await q("""SELECT DISTINCT b.user_id FROM kuzya_loyalty_bindings b JOIN kuzya_bot_users u USING (user_id)
                           JOIN kuzya_loyalty_cards c ON right(c.phone,10) = right(regexp_replace(b.phone,'\\D','','g'),10)
-                          WHERE c.card_type = 2""")
-    else:
-        rows = await q("SELECT user_id FROM kuzya_bot_users ORDER BY user_id")
+                          WHERE c.card_type = 2 AND u.unsubscribed_at IS NULL""")
+    else:   # отписавшихся (bot_stopped / заблокировали бота) рассылка обходит
+        rows = await q("SELECT user_id FROM kuzya_bot_users WHERE unsubscribed_at IS NULL ORDER BY user_id")
     return [r["user_id"] for r in rows]
 
 
@@ -565,11 +567,12 @@ def bcast_keyboard(btn_text, btn_url):
 async def broadcasts_page(request: Request):
     u = await current_user(request)
     if not u: return need_login()
-    n_all = await qv("SELECT COUNT(*) FROM kuzya_bot_users")
+    n_all = await qv("SELECT COUNT(*) FROM kuzya_bot_users WHERE unsubscribed_at IS NULL")
+    n_unsub = await qv("SELECT COUNT(*) FROM kuzya_bot_users WHERE unsubscribed_at IS NOT NULL")
     card2_total = await qv("SELECT COUNT(*) FROM kuzya_loyalty_cards WHERE card_type=2")
     card2_bound = len(await segment_uids("card2"))
     hist = await q("SELECT * FROM kuzya_broadcasts ORDER BY id DESC LIMIT 40")
-    return tpl.TemplateResponse("broadcasts.html", ctx(request, u, "broadcasts", n_all=n_all, card2_total=card2_total,
+    return tpl.TemplateResponse("broadcasts.html", ctx(request, u, "broadcasts", n_all=n_all, n_unsub=n_unsub, card2_total=card2_total,
         card2_bound=card2_bound, hist=hist, enabled=BROADCAST_ENABLED, delay=BROADCAST_DELAY, vitrina=VITRINA_URL))
 
 
@@ -655,6 +658,8 @@ async def run_broadcast(bid, uids, f):
             except Exception as e:
                 failed += 1
                 k = str(e)[:80]
+                if re.search(r"denied|blocked|forbidden|not\.found", k, re.I):   # бот заблокирован — это тоже отписка
+                    await qx("UPDATE kuzya_bot_users SET unsubscribed_at=NOW() WHERE user_id=$1 AND unsubscribed_at IS NULL", uid)
                 errors[k] = errors.get(k, 0) + 1
             if (i + 1) % 10 == 0:
                 await qx("UPDATE kuzya_broadcasts SET sent=$1, failed=$2 WHERE id=$3", sent, failed, bid)
@@ -874,7 +879,7 @@ async def analytics(request: Request):
         WITH d AS (SELECT generate_series($1::date, (NOW() AT TIME ZONE 'Asia/Omsk')::date, '1 day')::date AS d)
         SELECT d.d,
           (SELECT COUNT(*) FROM kuzya_bot_users WHERE (created_at AT TIME ZONE 'Asia/Omsk')::date = d.d
-             AND COALESCE(source,'') <> 'recovered') AS subs,
+             AND COALESCE(origin, CASE WHEN source='recovered' THEN 'recovered' END) IS NULL) AS subs,
           (SELECT COUNT(*) FROM kuzya_messages WHERE kind='start' AND (created_at AT TIME ZONE 'Asia/Omsk')::date = d.d) AS starts,
           (SELECT COUNT(*) FROM kuzya_messages WHERE kind='text' AND (created_at AT TIME ZONE 'Asia/Omsk')::date = d.d) AS questions,
           (SELECT COUNT(DISTINCT COALESCE(user_id::text, id::text)) FROM kuzya_vitrina_entries
@@ -884,14 +889,14 @@ async def analytics(request: Request):
           (SELECT COUNT(*) FROM kuzya_orders_log WHERE NOT is_test AND pay_status='paid' AND (created_at AT TIME ZONE 'Asia/Omsk')::date = d.d) AS paid,
           (SELECT COALESCE(SUM(total),0) FROM kuzya_orders_log WHERE NOT is_test AND pay_status='paid' AND (created_at AT TIME ZONE 'Asia/Omsk')::date = d.d) AS paid_sum
         FROM d ORDER BY d.d DESC""", SINCE)
-    base = await q1("""SELECT COUNT(*) total, COUNT(*) FILTER (WHERE source='recovered') recovered,
-                              COUNT(*) FILTER (WHERE created_at >= $1 AND COALESCE(source,'') <> 'recovered') new_since
+    base = await q1("""SELECT COUNT(*) total, COUNT(*) FILTER (WHERE origin='recovered' OR source='recovered') recovered, COUNT(*) FILTER (WHERE origin='piter_backup') piter,
+                              COUNT(*) FILTER (WHERE created_at >= $1 AND COALESCE(origin, CASE WHEN source='recovered' THEN 'recovered' END) IS NULL) new_since
                        FROM kuzya_bot_users""", t0)
     shops = await q("""SELECT COALESCE(s.city || ', ' || s.address, o.shop_id::text) shop, COUNT(*) n, SUM(o.total) s,
                               COUNT(*) FILTER (WHERE o.pay_status='paid') paid
                        FROM kuzya_orders_log o LEFT JOIN kuzya_shops s ON s.id=o.shop_id WHERE NOT o.is_test GROUP BY 1 ORDER BY 2 DESC""")
     raw = await q("""SELECT source src, COUNT(*) n FROM kuzya_bot_users
-                     WHERE COALESCE(source,'') <> 'recovered' AND created_at >= $1 GROUP BY 1 ORDER BY 2 DESC""", t0)
+                     WHERE COALESCE(origin, CASE WHEN source='recovered' THEN 'recovered' END) IS NULL AND created_at >= $1 GROUP BY 1 ORDER BY 2 DESC""", t0)
     sources = await label_sources(raw)
     tests = await qv("SELECT COUNT(*) FROM kuzya_orders_log WHERE is_test")
     return tpl.TemplateResponse("analytics.html", ctx(request, u, "analytics", days=days, base=base, shops=shops,

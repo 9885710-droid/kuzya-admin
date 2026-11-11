@@ -5,7 +5,7 @@
 <form id="f" class="card" onsubmit="return false">
   <label class="fld">Кому</label>
   <select name="audience" id="aud">
-    <option value="all">Все подписчики — {{ n_all }}</option>
+    <option value="all">Все подписчики — {{ n_all }} (без {{ n_unsub }} отписавшихся)</option>
     <option value="card2">Держатели «КУЗЯ Профи» — {{ card2_bound }} / {{ card2_total }}</option>
   </select>
   <p class="muted" style="margin-top:6px">«Профи»: {{ card2_bound }} привязали карту в боте из {{ card2_total }} карт в файле ВелКома — получат только привязавшие.</p>

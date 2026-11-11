@@ -3,7 +3,7 @@
 <h1>Аналитика</h1>
 <div class="row" style="gap:14px;margin-bottom:6px">
   <div class="card" style="flex:1;min-width:180px"><div class="muted">Подписчиков в базе</div><div style="font-size:28px;font-weight:800">{{ base.total }}</div>
-    <div class="muted">из них восстановлено из «Мониторинга»: {{ base.recovered }}</div></div>
+    <div class="muted">из них восстановлено из «Мониторинга»: {{ base.recovered }}{% if base.piter %}, из бэкапа Питера: {{ base.piter }}{% endif %}</div></div>
   <div class="card" style="flex:1;min-width:180px"><div class="muted">Новых с {{ since.strftime('%d.%m') }}</div><div style="font-size:28px;font-weight:800">{{ base.new_since }}</div></div>
 </div>
 <div class="card" style="padding:0;overflow-x:auto"><table>
