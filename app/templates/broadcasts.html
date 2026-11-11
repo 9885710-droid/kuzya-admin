@@ -33,7 +33,7 @@
   {% for h in hist %}<tr><td>{{ h.id }}</td><td class="muted">{{ h.created_at|fmt }}</td><td>{{ h.created_by }}</td>
     <td>{{ {'test':'тест','dry':'прогон','send':'РАССЫЛКА'}[h.kind] }}</td><td>{{ 'Профи' if h.audience=='card2' else 'все' }}</td>
     <td>{{ (h.text or '')[:60] }}{% if h.media %} 📎{{ h.media|length }}{% endif %}</td>
-    <td>{% if h.kind=='send' %}<span class="pill {{ 'ok' if h.status=='done' else 'queued' if h.status=='running' else 'fail' }}">{{ h.sent }}/{{ h.total }}{% if h.failed %}, сбоев {{ h.failed }}{% endif %}</span>{% elif h.kind=='dry' %}{{ h.total }} получ.{% else %}ок{% endif %}</td></tr>
+    <td>{% if h.kind=='send' %}<span class="pill {{ 'ok' if h.status=='done' else 'queued' if h.status=='running' else 'fail' }}">{{ h.sent }}/{{ h.total }}{% if h.failed %}, сбоев {{ h.failed }}{% endif %}</span>{% if h.status=='paused' %} <b>пауза</b>{% if is_admin %} <button class="btn ghost" onclick="resume({{ h.id }})">Продолжить</button>{% endif %}{% endif %}{% elif h.kind=='dry' %}{{ h.total }} получ.{% else %}ок{% endif %}</td></tr>
   {% else %}<tr><td colspan="7" class="muted">Пока пусто</td></tr>{% endfor %}
 </table></div>
 <script>
@@ -63,6 +63,11 @@ f.querySelectorAll('button[data-step]').forEach(b => b.onclick = async () => {
   if (step === 'dry') { stage = 2; dryTotal = r.total; if (red) red.disabled = {{ 'false' if enabled else 'true' }}; }
   if (step === 'send') poll(r.id);
 });
+async function resume(id) {
+  if (!confirm('Продолжить рассылку #' + id + ' с тех, кому ещё не уходило?')) return;
+  const r = await (await fetch('/api/broadcasts/resume/' + id, {method:'POST'})).json();
+  show(r.ok ? r.message : r.error, r.ok); if (r.ok) poll(id);
+}
 async function poll(id) {
   const r = await (await fetch('/api/broadcasts/status/' + id)).json();
   show('Рассылка #' + id + ': отправлено ' + r.sent + ' из ' + r.total + (r.failed ? ', сбоев ' + r.failed : '') + ' — ' + r.status, true);

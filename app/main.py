@@ -43,6 +43,16 @@ MONITOR_CHAT_ID = os.environ.get("MONITOR_CHAT_ID", "")
 ADMIN_NOTIFY_UID = os.environ.get("ADMIN_NOTIFY_UID", "")      # Max uid, кому уходят ссылки установки пароля
 BROADCAST_ENABLED = os.environ.get("BROADCAST_ENABLED", "0") == "1"
 BROADCAST_DELAY = float(os.environ.get("BROADCAST_DELAY", "0.4"))
+BROADCAST_ONCE = os.environ.get("BROADCAST_ONCE", "0") == "1"     # красная кнопка на одну рассылку: после запуска гаснет
+PAUSE_RATE, PAUSE_MIN = 0.05, 40       # недоставлено > 5 % (от 40 попыток) → пауза, сторож бота сразу пишет Вадиму (11.11)
+_PROC_START = datetime.now(timezone.utc)
+
+
+async def bcast_enabled():
+    if not BROADCAST_ENABLED: return False
+    if BROADCAST_ONCE and await qv("SELECT 1 FROM kuzya_broadcasts WHERE kind='send' AND created_at >= $1", _PROC_START):
+        return False
+    return True
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "1") == "1"
 OMSK = timezone(timedelta(hours=6))
 SINCE = date(2026, 11, 3)                 # бот на moscow с 03.11 — аналитика с этого дня
@@ -573,7 +583,7 @@ async def broadcasts_page(request: Request):
     card2_bound = len(await segment_uids("card2"))
     hist = await q("SELECT * FROM kuzya_broadcasts ORDER BY id DESC LIMIT 40")
     return tpl.TemplateResponse("broadcasts.html", ctx(request, u, "broadcasts", n_all=n_all, n_unsub=n_unsub, card2_total=card2_total,
-        card2_bound=card2_bound, hist=hist, enabled=BROADCAST_ENABLED, delay=BROADCAST_DELAY, vitrina=VITRINA_URL))
+        card2_bound=card2_bound, hist=hist, enabled=await bcast_enabled(), delay=BROADCAST_DELAY, vitrina=VITRINA_URL))
 
 
 async def _bcast_form(text, btn_text, btn_url, audience, files):
@@ -626,14 +636,14 @@ async def broadcasts_step(request: Request, step: str, text: str = Form(""), btn
                                                             "Никому ничего не отправлено."}
     # send
     if not is_admin(u): return {"ok": False, "error": "Боевую рассылку запускает администратор"}
-    if not BROADCAST_ENABLED: return {"ok": False, "error": "Боевые рассылки выключены (BROADCAST_ENABLED). Включаются по решению Вадима."}
+    if not await bcast_enabled(): return {"ok": False, "error": "Боевые рассылки выключены. Включаются по решению Вадима."}
     if not await qv("""SELECT 1 FROM kuzya_broadcasts WHERE kind='dry' AND content_hash=$1 AND total=$2
                        AND created_at > NOW() - interval '1 hour'""", f["hash"], len(uids)):
         return {"ok": False, "error": "Нужен холостой прогон этого же содержимого за последний час (и число получателей не изменилось)"}
     if confirm_total.strip() != str(len(uids)):
         return {"ok": False, "error": f"Для подтверждения введите число получателей: {len(uids)}"}
-    if await qv("SELECT 1 FROM kuzya_broadcasts WHERE kind='send' AND status='running'"):
-        return {"ok": False, "error": "Другая рассылка ещё идёт"}
+    if await qv("SELECT 1 FROM kuzya_broadcasts WHERE kind='send' AND status IN ('running','paused')"):
+        return {"ok": False, "error": "Другая рассылка ещё идёт или стоит на паузе"}
     bid = await qv("""INSERT INTO kuzya_broadcasts(kind, text, media, btn_text, btn_url, audience, content_hash, total, status, created_by)
                       VALUES ('send',$1,$2,$3,$4,$5,$6,$7,'running',$8) RETURNING id""",
                    f["text"], f["media"], f["btn_text"], f["btn_url"], f["audience"], f["hash"], len(uids), u["login"])
@@ -642,9 +652,21 @@ async def broadcasts_step(request: Request, step: str, text: str = Form(""), btn
     return {"ok": True, "id": bid, "total": len(uids), "message": f"Рассылка #{bid} запущена"}
 
 
-async def run_broadcast(bid, uids, f):
-    sent = failed = 0
-    errors = {}
+async def run_broadcast(bid, uids, f, sent=0, failed=0, failed_uids=None, errors=None):
+    """Отправка по uids. Каждые 10: счётчики в базу; статус 'paused' в базе (вручную) → стоп; недоставлено > 5 %
+    попыток этого прохода (от PAUSE_MIN) → пауза. Продолжение — /api/broadcasts/resume/{bid}: с тех, кому не уходило."""
+    failed_uids, errors = list(failed_uids or []), dict(errors or {})
+    a0, f0 = sent + failed, failed            # проход после «продолжить» меряем отдельно, иначе пауза сработает сразу
+    status = "done"
+
+    async def save(st=None, why=None):
+        res = {"errors": errors, "failed_uids": failed_uids}
+        if why: res["pause_reason"] = why
+        if st:
+            await qx("UPDATE kuzya_broadcasts SET sent=$1, failed=$2, status=$3, result=$4, finished_at=CASE WHEN $3 IN ('done','failed') THEN NOW() END WHERE id=$5",
+                     sent, failed, st, res, bid)
+        else:
+            await qx("UPDATE kuzya_broadcasts SET sent=$1, failed=$2, result=$3 WHERE id=$4", sent, failed, res, bid)
     try:
         atts = await upload_all(f["media"])            # файлы в Max — один раз на всю рассылку
         kb = bcast_keyboard(f["btn_text"], f["btn_url"])
@@ -657,19 +679,44 @@ async def run_broadcast(bid, uids, f):
                          uid, f["text"], mid, f"bcast#{bid}")
             except Exception as e:
                 failed += 1
+                failed_uids.append(uid)
                 k = str(e)[:80]
                 if re.search(r"denied|blocked|forbidden|not\.found", k, re.I):   # бот заблокирован — это тоже отписка
                     await qx("UPDATE kuzya_bot_users SET unsubscribed_at=NOW() WHERE user_id=$1 AND unsubscribed_at IS NULL", uid)
                 errors[k] = errors.get(k, 0) + 1
             if (i + 1) % 10 == 0:
-                await qx("UPDATE kuzya_broadcasts SET sent=$1, failed=$2 WHERE id=$3", sent, failed, bid)
+                await save()
+                if await qv("SELECT status FROM kuzya_broadcasts WHERE id=$1", bid) == "paused":
+                    return                                   # пауза вручную — счётчики уже в базе
+                att, fl = sent + failed - a0, failed - f0
+                if att >= PAUSE_MIN and fl > PAUSE_RATE * att:
+                    await save("paused", f"недоставлено {fl} из {att} ({fl * 100 / att:.1f} %) > 5 %")
+                    return
             await asyncio.sleep(BROADCAST_DELAY)
-        status = "done"
     except Exception as e:
         errors[f"остановлено: {str(e)[:100]}"] = 1
         status = "failed"
-    await qx("UPDATE kuzya_broadcasts SET sent=$1, failed=$2, status=$3, finished_at=NOW(), result=$4 WHERE id=$5",
-             sent, failed, status, {"errors": errors}, bid)
+    await save(status)
+
+
+@app.post("/api/broadcasts/resume/{bid}")
+async def broadcasts_resume(request: Request, bid: int):
+    u = await current_user(request)
+    if not u: return JSONResponse({"ok": False}, status_code=401)
+    if not is_admin(u): return {"ok": False, "error": "Продолжает администратор"}
+    if not BROADCAST_ENABLED: return {"ok": False, "error": "Боевые рассылки выключены"}
+    r = await q1("SELECT * FROM kuzya_broadcasts WHERE id=$1 AND kind='send'", bid)
+    if not r or r["status"] != "paused": return {"ok": False, "error": "Эта рассылка не на паузе"}
+    res = r["result"] or {}
+    res = json.loads(res) if isinstance(res, str) else res
+    tried = set(res.get("failed_uids") or []) | {x["user_id"] for x in await q(
+        "SELECT user_id FROM kuzya_messages WHERE kind='broadcast' AND payload=$1", f"bcast#{bid}")}
+    uids = [x for x in await segment_uids(r["audience"]) if x not in tried]
+    await qx("UPDATE kuzya_broadcasts SET status='running' WHERE id=$1", bid)
+    await log_action(u["login"], "broadcast_resume", f"#{bid}: осталось {len(uids)}", client_ip(request))
+    f = {k: r[k] for k in ("text", "media", "btn_text", "btn_url")}
+    asyncio.create_task(run_broadcast(bid, uids, f, r["sent"], r["failed"], res.get("failed_uids"), res.get("errors")))
+    return {"ok": True, "message": f"Рассылка #{bid} продолжена: осталось {len(uids)}"}
 
 
 @app.get("/api/broadcasts/status/{bid}")
