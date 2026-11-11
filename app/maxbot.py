@@ -15,7 +15,9 @@ VIDEO_EXT = (".mp4", ".mov", ".mkv", ".webm")
 
 
 class MaxError(Exception):
-    pass
+    def __init__(self, msg, status=None, retry_after=None):
+        super().__init__(msg)
+        self.status, self.retry_after = status, retry_after
 
 
 def _client(timeout=30):
@@ -28,7 +30,9 @@ async def _call(method, path, *, params=None, json=None):
     if r.status_code >= 400:
         try: d = r.json()
         except Exception: d = {}
-        raise MaxError(f"{r.status_code} {d.get('code') or ''} {d.get('message') or r.text[:120]}".strip())
+        ra = r.headers.get("Retry-After")
+        raise MaxError(f"{r.status_code} {d.get('code') or ''} {d.get('message') or r.text[:120]}".strip(), r.status_code,
+                       float(ra) if ra and ra.replace(".", "", 1).isdigit() else None)
     return r.json() if r.content else {}
 
 
