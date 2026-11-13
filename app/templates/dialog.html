@@ -31,11 +31,26 @@ const UID = {{ card.user_id }};
 let last = 0;
 const box = document.getElementById('msgs'), note = document.getElementById('note');
 function show(t, ok) { note.className = 'note ' + (ok ? 'ok' : 'err'); note.textContent = t; }
+const ATT = {image:'📷 фото', sticker:'🙂 стикер', audio:'🎤 голосовое', video:'🎬 видео', file:'📎 файл', location:'📍 геолокация', contact:'👤 контакт', share:'🔗 ссылка'};
+function attEl(a) {
+  const w = document.createElement('div'); w.style.marginTop = '4px';
+  if ((a.type === 'image' || a.type === 'sticker') && a.url) {
+    const l = document.createElement('a'); l.href = a.url; l.target = '_blank'; l.rel = 'noopener';
+    const i = document.createElement('img'); i.src = a.url; i.alt = ATT[a.type]; i.style.cssText = 'max-width:240px;max-height:240px;border-radius:8px;display:block';
+    l.appendChild(i); w.appendChild(l); return w;
+  }
+  const label = (ATT[a.type] || ('[' + a.type + ']')) + (a.name ? ' · ' + a.name : '');
+  const href = a.type === 'location' && a.lat != null ? 'https://yandex.ru/maps/?pt=' + a.lon + ',' + a.lat + '&z=16&l=map' : a.url;
+  if (href) { const l = document.createElement('a'); l.href = href; l.target = '_blank'; l.rel = 'noopener'; l.textContent = label; w.appendChild(l); }
+  else w.textContent = label + ' (открыть в Max)';
+  return w;
+}
 function bubble(m) {
   const d = document.createElement('div');
   const sys = m.kind === 'start';
   d.className = 'm ' + (sys ? 'sys' : m.dir) + (m.delivery ? ' failed' : '');
-  d.textContent = sys ? ('▶️ запустил бота' + (m.payload ? ' · ' + m.payload : '')) : (m.text || (m.payload ? '[' + m.payload + ']' : '[пусто]'));
+  d.textContent = sys ? ('▶️ запустил бота' + (m.payload ? ' · ' + m.payload : '')) : (m.text || (m.att ? '' : m.payload ? '[' + m.payload + ']' : '[пусто]'));
+  for (const a of (m.att || [])) d.appendChild(attEl(a));
   const meta = document.createElement('div'); meta.className = 'meta';
   const who = m.kind === 'operator' ? ('оператор ' + m.operator) : m.kind === 'stub' ? 'бот (заглушка)' : m.kind === 'broadcast' ? 'рассылка' : '';
   meta.textContent = [m.at, who, m.edited ? 'изменено' : '', m.delivery ? 'НЕ ДОСТАВЛЕНО' : ''].filter(Boolean).join(' · ');

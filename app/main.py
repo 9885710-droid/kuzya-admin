@@ -415,6 +415,7 @@ async def dialogs_page(request: Request, only: str = ""):
     if not u: return need_login()
     q_ = request.query_params.get("q", "").strip()
     where, args = ["TRUE"], []
+    only = only or ("all" if q_ else "open")   # по умолчанию — «Ждут ответа» (ВелКом 13.11); поиск — по всем
     if only == "open":
         where.append("d.unanswered > 0")
     if q_:
@@ -444,8 +445,19 @@ async def _user_card(uid):
                        LEFT JOIN kuzya_dialogs d USING (user_id) WHERE bu.user_id=$1""", uid)
 
 
+def _att(payload):
+    """Вложения входящего: {"att": [{type, url|lat/lon|name}]} (kuzya-web с 13.11); старые записи — список типов."""
+    try: d = json.loads(payload) if payload and payload[:1] in "[{" else None
+    except Exception: return None
+    if isinstance(d, dict) and isinstance(d.get("att"), list): return d["att"]
+    if isinstance(d, list) and all(isinstance(x, str) for x in d): return [{"type": x} for x in d]
+    return None
+
+
 def _msg_json(m):
-    return {"id": m["id"], "dir": m["direction"], "kind": m["kind"], "text": m["text"] or "", "payload": m["payload"],
+    att = _att(m["payload"]) if m["direction"] == "in" else None
+    return {"id": m["id"], "dir": m["direction"], "kind": m["kind"], "text": m["text"] or "", "att": att,
+            "payload": None if att else m["payload"],
             "operator": m["operator"], "at": fmt(m["created_at"]), "delivery": m["delivery"],
             "edited": bool(m["edited_at"]), "editable": m["kind"] == "operator" and bool(m["max_mid"])}
 
